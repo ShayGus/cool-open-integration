@@ -1,0 +1,18 @@
+{
+  "domain": "cool_open_integration",
+  "name": "CoolAutomation Cloud Open Integration",
+  "config_flow": true,
+  "documentation": "https://www.home-assistant.io/integrations/cool_open_integration",
+  "requirements": [
+    "cool-open-client == 0.0.4"
+  ],
+  "ssdp": [],
+  "zeroconf": [],
+  "homekit": {},
+  "dependencies": [],
+  "codeowners": [
+    "@ShayGus"
+  ],
+  "iot_class": "cloud_push",
+  "version": "0.0.1"
+}
