@@ -17,8 +17,7 @@ from cool_open_client.cool_automation_client import CoolAutomationClient
 
 from .const import DOMAIN, TITLE
 
-_LOGGER = logging.getLogger(__name__)
-_LOGGER.setLevel(logging.DEBUG)
+_LOGGER = logging.getLogger(__package__)
 
 # TODO adjust the data schema to the data that you need
 STEP_USER_DATA_SCHEMA = vol.Schema(
@@ -46,7 +45,7 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
     if token == "Unauthorized":
         raise InvalidAuth
 
-    api: CoolAutomationClient = await CoolAutomationClient.create(token)
+    api: CoolAutomationClient = await CoolAutomationClient.create(token, logger=_LOGGER)
     devices = await api.get_devices()
     me = await api.get_me()
     id = me.id

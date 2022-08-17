@@ -20,7 +20,7 @@ _LOGGER = logging.getLogger(__name__)
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up CoolAutomation Cloud Open Integration from a config entry."""
-   
+
     # hass.data[DOMAIN] = config
     # conf: ConfigType | None = config.get(DOMAIN)
 
@@ -32,15 +32,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     _LOGGER.debug("async setup")
     token = entry.data["token"]
     try:
-        units_factory = await HVACUnitsFactory.create(token=token)
         client = await CoolAutomationClient.create(token=token)
+        units_factory = await HVACUnitsFactory.create(token=token)
         units = await units_factory.generate_units_from_api()
         if not units:
             raise ConfigEntryNotReady
     except OSError as error:
         raise ConfigEntryNotReady() from error
 
-    coordinator = CoolAutomationDataUpdateCoordinator(hass, entry, client)
+    coordinator = CoolAutomationDataUpdateCoordinator(hass, entry, client, units)
     await coordinator.async_config_entry_first_refresh()
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
