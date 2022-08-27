@@ -1,6 +1,5 @@
 from __future__ import annotations
 import logging
-from time import sleep
 
 from typing import Any
 
@@ -103,24 +102,22 @@ class CoolAutomationUnitEntity(CoordinatorEntity[CoolAutomationDataUpdateCoordin
         return self.coordinator.data[self._device_id]
 
     async def async_turn_on(self) -> None:
-        """Turn Sensibo unit on."""
+        """Turn HVAC unit on."""
         await self.unit.turn_on()
 
     async def async_turn_off(self) -> None:
-        """Turn Sensibo unit on."""
+        """Turn HVAC unit on."""
         await self.unit.turn_off()
 
     def get_precision(self):
         return PRECISION_HALVES if self.unit.is_half_degree else PRECISION_WHOLE
 
     def get_supported_features(self):
-        return (
-            0 | ClimateEntityFeature.TARGET_TEMPERATURE | ClimateEntityFeature.FAN_MODE
-            if self.unit.is_fan_mode
-            else 0 | ClimateEntityFeature.SWING_MODE
-            if self.unit.is_swing_mode
-            else 0
-        )
+        supported = 0
+        supported |= ClimateEntityFeature.TARGET_TEMPERATURE
+        supported |= ClimateEntityFeature.FAN_MODE if self.unit.is_fan_mode else 0
+        supported |= ClimateEntityFeature.SWING_MODE if self.unit.is_swing_mode else 0
+        return supported
 
     @property
     def name(self) -> str:
@@ -207,8 +204,8 @@ class CoolAutomationUnitEntity(CoordinatorEntity[CoolAutomationDataUpdateCoordin
 
         new_temp = self._get_valid_temperature(temperature)
         await self.unit.set_temperature_set_point(new_temp)
-        self._attr_target_temperature = new_temp
         self.async_write_ha_state()
+        self.coordinator.async_refresh()
 
     def _get_valid_temperature(self, target: float) -> float:
         if target <= self.min_temp:
@@ -223,6 +220,8 @@ class CoolAutomationUnitEntity(CoordinatorEntity[CoolAutomationDataUpdateCoordin
             raise HomeAssistantError("Current mode doesn't support setting Fanlevel")
 
         await self.unit.set_fan_mode(fan_mode.upper())
+        self.async_write_ha_state()
+        self.coordinator.async_refresh()
 
     async def async_set_swing_mode(self, swing_mode) -> None:
         """Set new target swing operation."""
@@ -230,11 +229,15 @@ class CoolAutomationUnitEntity(CoordinatorEntity[CoolAutomationDataUpdateCoordin
             raise HomeAssistantError("Current mode doesn't support setting Fanlevel")
 
         await self.unit.set_swing_mode(swing_mode.upper())
+        self.async_write_ha_state()
+        self.coordinator.async_refresh()
 
     async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
         """Set new target operation mode."""
         if hvac_mode == HVACMode.OFF:
             await self.unit.turn_off()
+            self.async_write_ha_state()
+            self.coordinator.async_refresh()
             return
         elif self.hvac_mode == HVACMode.OFF:
             await self.unit.turn_on()
