@@ -16,14 +16,13 @@ _LOGGER = logging.getLogger(__package__)
 class CoolAutomationDataUpdateCoordinator(DataUpdateCoordinator):
     """Class to manage fetching Coolmaster data."""
 
-    data: List[HVACUnit]
+    data: list[HVACUnit]
 
     def __init__(
         self, hass: HomeAssistant, entry: ConfigEntry, client: CoolAutomationClient, units: List[HVACUnit]
     ) -> None:
         """Initialize global Coolmaster data updater."""
         _LOGGER.debug("Init Cool Automation update coordinator")
-        _LOGGER.debug("Initializing CoolAutomation Open Inegration.................................................")
         self._client = client
         self.hass = hass
         self.units = units

@@ -3,8 +3,8 @@ import logging
 
 from typing import Any
 
-from config.custom_components.cool_open_integration.coordinator import CoolAutomationDataUpdateCoordinator
 from cool_open_client.unit import UnitCallback
+from cool_open_client.unit import HVACUnit
 
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -28,11 +28,8 @@ from homeassistant.const import (
 )
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
-
-# from homeassistant.helpers import config_validation as cv, entity_platform
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from cool_open_client.unit import HVACUnit
 
 from .const import DOMAIN
 from .coordinator import CoolAutomationDataUpdateCoordinator
@@ -41,6 +38,7 @@ from .coordinator import CoolAutomationDataUpdateCoordinator
 # Operation Modes ['COOL', 'HEAT', 'DRY', 'FAN', 'AUTO']
 # Operation Statuses ['on', 'off']
 # Swing Modes ['vertical', '30', '45', '60', 'horizontal', 'auto']
+
 OPEN_CLIENT_TO_HA_MODES = {
     "COOL": HVACMode.COOL,
     "HEAT": HVACMode.HEAT,
@@ -215,7 +213,9 @@ class CoolAutomationUnitEntity(CoordinatorEntity[CoolAutomationDataUpdateCoordin
         return target
 
     async def async_set_fan_mode(self, fan_mode: str) -> None:
-        """Set new target fan mode."""
+        """Set new target fan mode.
+        fan_mode: str - fan mode to set
+        """
         if not self.unit.fan_modes:
             raise HomeAssistantError("Current mode doesn't support setting Fanlevel")
 
@@ -223,8 +223,10 @@ class CoolAutomationUnitEntity(CoordinatorEntity[CoolAutomationDataUpdateCoordin
         self.async_write_ha_state()
         self.coordinator.async_refresh()
 
-    async def async_set_swing_mode(self, swing_mode) -> None:
-        """Set new target swing operation."""
+    async def async_set_swing_mode(self, swing_mode: str) -> None:
+        """Set new target swing operation.
+        swing_mode: str - swing mode to set
+        """
         if not self.unit.swing_modes:
             raise HomeAssistantError("Current mode doesn't support setting Fanlevel")
 
@@ -244,7 +246,7 @@ class CoolAutomationUnitEntity(CoordinatorEntity[CoolAutomationDataUpdateCoordin
 
         _LOGGER.debug(str(OPEN_CLIENT_TO_HA_MODES))
         mode = [k for k, v in OPEN_CLIENT_TO_HA_MODES.items() if v == hvac_mode]
-        _LOGGER.debug("Changing mode to %s" % mode)
+        _LOGGER.debug("Changing mode to %s", mode)
         if not mode:
             raise ValueError("Unsupported mode was provided")
 
@@ -260,8 +262,7 @@ class CoolAutomationUnitEntity(CoordinatorEntity[CoolAutomationDataUpdateCoordin
 
     async def async_assume_state(self) -> None:
         try:
-            # self.coordinator.async_refresh()
-            # self.async_schedule_update_ha_state()
+            self.coordinator._unschedule_refresh()
             self.async_write_ha_state()
         except Exception as error:
             _LOGGER.error(f"Failed to set state for unit {self.name}: {error}")
