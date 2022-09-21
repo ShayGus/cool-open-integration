@@ -1,0 +1,8 @@
+{
+    "name": "Cool Open Integration",
+    "content_in_root": false,
+    "filename": "my_super_awesome_thing.js",
+    "country": ["NO", "SE", "DK"],
+    "hide_default_branch": true,
+    "render_readme": true
+  }

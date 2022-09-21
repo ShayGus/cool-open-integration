@@ -17,6 +17,6 @@
   "iot_class": "cloud_push",
   "version": "0.0.1",
   "supported_brands": {
-    "roborock": "coolmaster"
+    "coolmaster": "CoolMaster"
   }
 }
