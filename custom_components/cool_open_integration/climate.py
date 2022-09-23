@@ -59,23 +59,33 @@ OPEN_CLIENT_TO_HA_FAN_MODES = {
 _LOGGER = logging.getLogger(__package__)
 
 
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
+async def async_setup_entry(
+    hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
+) -> None:
     """Set up the Sensibo climate entry."""
 
     coordinator: CoolAutomationDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
 
-    entities = [CoolAutomationUnitEntity(coordinator, unit_id) for unit_id, _ in coordinator.data.items()]
+    entities = [
+        CoolAutomationUnitEntity(coordinator, unit_id)
+        for unit_id, _ in coordinator.data.items()
+    ]
 
     async_add_entities(entities)
     _LOGGER.debug("Entities added to HA")
     coordinator.client.open_socket()
 
 
-class CoolAutomationUnitEntity(CoordinatorEntity[CoolAutomationDataUpdateCoordinator], ClimateEntity, UnitCallback):
+class CoolAutomationUnitEntity(
+    CoordinatorEntity[CoolAutomationDataUpdateCoordinator], ClimateEntity, UnitCallback
+):
+    """HVAC Entity of CoolAutomation controllable HVAC unit"""
 
     _attr_has_entity_name = True
 
-    def __init__(self, coordinator: CoolAutomationDataUpdateCoordinator, unit_id: str) -> None:
+    def __init__(
+        self, coordinator: CoolAutomationDataUpdateCoordinator, unit_id: str
+    ) -> None:
         """Initiate SensiboClimate."""
         super().__init__(coordinator)
         self._device_id = unit_id
@@ -97,6 +107,11 @@ class CoolAutomationUnitEntity(CoordinatorEntity[CoolAutomationDataUpdateCoordin
 
     @property
     def unit_data(self) -> HVACUnit:
+        """Data of the controllable unit
+
+        Returns:
+            HVACUnit: The controllable unit to control
+        """
         return self.coordinator.data[self._device_id]
 
     async def async_turn_on(self) -> None:
@@ -107,10 +122,20 @@ class CoolAutomationUnitEntity(CoordinatorEntity[CoolAutomationDataUpdateCoordin
         """Turn HVAC unit on."""
         await self.unit.turn_off()
 
-    def get_precision(self):
+    def get_precision(self) -> float:
+        """Returns precision of temperature.
+
+        Returns:
+            float: precision of temperature
+        """
         return PRECISION_HALVES if self.unit.is_half_degree else PRECISION_WHOLE
 
-    def get_supported_features(self):
+    def get_supported_features(self) -> int:
+        """Get supported features.
+
+        Returns:
+            int: int mask of supported features
+        """
         supported = 0
         supported |= ClimateEntityFeature.TARGET_TEMPERATURE
         supported |= ClimateEntityFeature.FAN_MODE if self.unit.is_fan_mode else 0
@@ -131,7 +156,9 @@ class CoolAutomationUnitEntity(CoordinatorEntity[CoolAutomationDataUpdateCoordin
     @property
     def hvac_modes(self) -> list[HVACMode]:
         """Return the list of available hvac operation modes."""
-        hvac_modes = [OPEN_CLIENT_TO_HA_MODES[mode] for mode in self.unit.operation_modes]
+        hvac_modes = [
+            OPEN_CLIENT_TO_HA_MODES[mode] for mode in self.unit.operation_modes
+        ]
         hvac_modes.append(HVACMode.OFF)
         return hvac_modes if hvac_modes else [HVACMode.OFF]
 
@@ -153,13 +180,11 @@ class CoolAutomationUnitEntity(CoordinatorEntity[CoolAutomationDataUpdateCoordin
     @property
     def fan_mode(self) -> str | None:
         """Return the fan setting."""
-        # return OPEN_CLIENT_TO_HA_FAN_MODES[self.unit.fan_mode] if self.unit.is_on else None
         return self.unit.fan_mode.capitalize()
 
     @property
     def fan_modes(self) -> list[str] | None:
         """Return the swing setting."""
-        # fan_modes = [OPEN_CLIENT_TO_HA_FAN_MODES[mode] for mode in self.unit.fan_modes]
         fan_modes = self.unit.fan_modes
         return [mode.capitalize() for mode in fan_modes] if fan_modes else None
 
@@ -202,8 +227,8 @@ class CoolAutomationUnitEntity(CoordinatorEntity[CoolAutomationDataUpdateCoordin
 
         new_temp = self._get_valid_temperature(temperature)
         await self.unit.set_temperature_set_point(new_temp)
-        self.async_write_ha_state()
-        self.coordinator.async_refresh()
+        self._attr_target_temperature = new_temp
+        await self.async_assume_state()
 
     def _get_valid_temperature(self, target: float) -> float:
         if target <= self.min_temp:
@@ -220,8 +245,8 @@ class CoolAutomationUnitEntity(CoordinatorEntity[CoolAutomationDataUpdateCoordin
             raise HomeAssistantError("Current mode doesn't support setting Fanlevel")
 
         await self.unit.set_fan_mode(fan_mode.upper())
-        self.async_write_ha_state()
-        self.coordinator.async_refresh()
+        self._attr_fan_mode = fan_mode
+        await self.async_assume_state()
 
     async def async_set_swing_mode(self, swing_mode: str) -> None:
         """Set new target swing operation.
@@ -231,18 +256,18 @@ class CoolAutomationUnitEntity(CoordinatorEntity[CoolAutomationDataUpdateCoordin
             raise HomeAssistantError("Current mode doesn't support setting Fanlevel")
 
         await self.unit.set_swing_mode(swing_mode.upper())
-        self.async_write_ha_state()
-        self.coordinator.async_refresh()
+        await self.async_assume_state()
 
     async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
         """Set new target operation mode."""
+        turn_on = False
         if hvac_mode == HVACMode.OFF:
             await self.unit.turn_off()
-            self.async_write_ha_state()
-            self.coordinator.async_refresh()
+            self._attr_hvac_mode = hvac_mode
+            await self.async_assume_state()
             return
-        elif self.hvac_mode == HVACMode.OFF:
-            await self.unit.turn_on()
+        if self.hvac_mode == HVACMode.OFF:
+            turn_on = True
 
         _LOGGER.debug(str(OPEN_CLIENT_TO_HA_MODES))
         mode = [k for k, v in OPEN_CLIENT_TO_HA_MODES.items() if v == hvac_mode]
@@ -252,12 +277,15 @@ class CoolAutomationUnitEntity(CoordinatorEntity[CoolAutomationDataUpdateCoordin
 
         await self.unit.set_opration_mode(mode[0])
         self._attr_hvac_mode = hvac_mode
-        self.async_write_ha_state()
-        await self.coordinator.async_request_refresh()
+        if turn_on:
+            await self.unit.turn_on()
+        await self.async_assume_state()
 
     def unit_update_callback(self) -> None:
-        _LOGGER.warning("Unit update callback")
-        _LOGGER.warning(str(self.unit))
+        """Update callback is part of the client, it will be invoked when an update to the unit occured"""
+        _LOGGER.debug("Unit update callback")
+        _LOGGER.debug(str(self.unit))
+        self._attr_current_temperature = self.unit.ambient_temperature
         self.hass.create_task(self.async_assume_state())
 
     async def async_assume_state(self) -> None:
@@ -265,4 +293,4 @@ class CoolAutomationUnitEntity(CoordinatorEntity[CoolAutomationDataUpdateCoordin
             self.coordinator._unschedule_refresh()
             self.async_write_ha_state()
         except Exception as error:
-            _LOGGER.error(f"Failed to set state for unit {self.name}: {error}")
+            _LOGGER.error("Failed to set state for unit %: %", self.name, error)
