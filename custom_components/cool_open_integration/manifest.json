@@ -5,7 +5,7 @@
   "documentation": "https://github.com/ShayGus/cool-open-integration/wiki",
   "issue_tracker": "https://github.com/ShayGus/cool-open-integration/issues",
   "requirements": [
-    "cool-open-client==0.0.7"
+    "cool-open-client==0.0.8"
   ],
   "ssdp": [],
   "zeroconf": [],
@@ -15,7 +15,7 @@
     "@ShayGus"
   ],
   "iot_class": "cloud_push",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "supported_brands": {
     "coolmaster": "CoolMaster"
   }
