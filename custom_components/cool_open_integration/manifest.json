@@ -5,7 +5,7 @@
   "documentation": "https://github.com/ShayGus/cool-open-integration/wiki",
   "issue_tracker": "https://github.com/ShayGus/cool-open-integration/issues",
   "requirements": [
-    "cool-open-client==0.0.8"
+    "cool-open-client==0.0.9"
   ],
   "ssdp": [],
   "zeroconf": [],
