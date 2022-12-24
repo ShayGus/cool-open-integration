@@ -15,8 +15,5 @@
     "@ShayGus"
   ],
   "iot_class": "cloud_push",
-  "version": "0.0.3",
-  "supported_brands": {
-    "coolmaster": "CoolMaster"
-  }
+  "version": "0.0.3"
 }
