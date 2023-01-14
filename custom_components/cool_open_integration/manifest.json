@@ -5,7 +5,7 @@
   "documentation": "https://github.com/ShayGus/cool-open-integration/wiki",
   "issue_tracker": "https://github.com/ShayGus/cool-open-integration/issues",
   "requirements": [
-    "cool-open-client==0.0.9"
+    "cool-open-client==0.0.10"
   ],
   "ssdp": [],
   "zeroconf": [],
@@ -15,5 +15,5 @@
     "@ShayGus"
   ],
   "iot_class": "cloud_push",
-  "version": "0.0.3"
+  "version": "0.0.4"
 }

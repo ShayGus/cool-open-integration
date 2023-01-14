@@ -4,10 +4,13 @@ from __future__ import annotations
 import logging
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import ConfigEntryNotReady
+from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 
 from cool_open_client.hvac_units_factory import HVACUnitsFactory
-from cool_open_client.cool_automation_client import CoolAutomationClient
+from cool_open_client.cool_automation_client import (
+    CoolAutomationClient,
+    InvalidTokenException,
+)
 
 from .const import DOMAIN, PLATFORMS
 from .coordinator import CoolAutomationDataUpdateCoordinator
@@ -33,11 +36,38 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     token = entry.data["token"]
     try:
         client = await CoolAutomationClient.create(token=token)
+    except OSError as error:
+        raise ConfigEntryNotReady() from error
+    except InvalidTokenException as error:
+        _LOGGER.error("Invalid token, reauthenticating...")
+        username = entry.data["username"]
+        password = entry.data["password"]
+        try:
+            token = await CoolAutomationClient.authenticate(username, password)
+            hass.config_entries.async_update_entry(
+                entry, data={"username": username, "password": password, "token": token}
+            )
+            client = await CoolAutomationClient.create(token=token)
+        except Exception as error:
+            _LOGGER.error("Can't authenticate, wrong credentials: %s", error)
+            raise ConfigEntryAuthFailed(
+                "Authentication is no longer valid. Please reauthenticate"
+            ) from error
+    except Exception as error:
+        _LOGGER.error("General Error: %s", error)
+        raise ConfigEntryNotReady() from error
+    try:
         units_factory = await HVACUnitsFactory.create(token=token)
         units = await units_factory.generate_units_from_api()
         if not units:
             raise ConfigEntryNotReady
     except OSError as error:
+        raise ConfigEntryNotReady() from error
+    except InvalidTokenException as error:
+        _LOGGER.error("Invalid token")
+        raise ConfigEntryAuthFailed(error) from error
+    except Exception as error:
+        _LOGGER.error("General Error: %s", error)
         raise ConfigEntryNotReady() from error
 
     coordinator = CoolAutomationDataUpdateCoordinator(hass, entry, client, units)
