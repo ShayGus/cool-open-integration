@@ -3,15 +3,15 @@
   "name": "CoolAutomation Cloud Open Integration",
   "codeowners": [
     "@ShayGus"
-  ],  
-  "config_flow": true,  
+  ],
+  "config_flow": true,
   "dependencies": [],
   "documentation": "https://github.com/ShayGus/cool-open-integration/wiki",
-  "homekit": {},    
-  "iot_class": "cloud_push",  
-  "issue_tracker": "https://github.com/ShayGus/cool-open-integration/issues",  
+  "homekit": {},
+  "iot_class": "cloud_push",
+  "issue_tracker": "https://github.com/ShayGus/cool-open-integration/issues",
   "requirements": [
-    "cool-open-client==0.0.12"
+    "cool-open-client==0.0.14"
   ],
   "ssdp": [],
   "version": "0.0.4",

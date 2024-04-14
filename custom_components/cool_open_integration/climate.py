@@ -1,13 +1,10 @@
 from __future__ import annotations
-import logging
 
+import logging
 from typing import Any
 
-from cool_open_client.unit import UnitCallback
-from cool_open_client.unit import HVACUnit
+from cool_open_client.unit import HVACUnit, UnitCallback
 
-from homeassistant.helpers.entity import DeviceInfo
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.components.climate import ClimateEntity
 from homeassistant.components.climate.const import (
     FAN_AUTO,
@@ -24,12 +21,13 @@ from homeassistant.const import (
     ATTR_TEMPERATURE,
     PRECISION_HALVES,
     PRECISION_WHOLE,
-    TEMP_CELSIUS,
+    UnitOfTemperature,
 )
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
 from .coordinator import CoolAutomationDataUpdateCoordinator
@@ -56,6 +54,8 @@ OPEN_CLIENT_TO_HA_FAN_MODES = {
     "AUTO": FAN_AUTO,
 }
 
+CELSIUS = UnitOfTemperature.CELSIUS
+
 _LOGGER = logging.getLogger(__package__)
 
 
@@ -79,7 +79,7 @@ async def async_setup_entry(
 class CoolAutomationUnitEntity(
     CoordinatorEntity[CoolAutomationDataUpdateCoordinator], ClimateEntity, UnitCallback
 ):
-    """HVAC Entity of CoolAutomation controllable HVAC unit"""
+    """HVAC Entity of CoolAutomation controllable HVAC unit."""
 
     _attr_has_entity_name = True
 
@@ -100,17 +100,18 @@ class CoolAutomationUnitEntity(
         self._client = coordinator.client
         self.unit: HVACUnit = coordinator.data[unit_id]
         self._attr_unique_id = self.unit.name
-        self._attr_temperature_unit = TEMP_CELSIUS
+        self._attr_temperature_unit = CELSIUS
         self._attr_supported_features = self.get_supported_features()
         self._attr_precision = self.get_precision()
         self.unit.regiter_callback(self)
 
     @property
     def unit_data(self) -> HVACUnit:
-        """Data of the controllable unit
+        """Data of the controllable unit.
 
         Returns:
             HVACUnit: The controllable unit to control
+
         """
         return self.coordinator.data[self._device_id]
 
@@ -123,10 +124,11 @@ class CoolAutomationUnitEntity(
         await self.unit.turn_off()
 
     def get_precision(self) -> float:
-        """Returns precision of temperature.
+        """Get Temperature.
 
         Returns:
-            float: precision of temperature
+            float: precision of temperature.
+
         """
         return PRECISION_HALVES if self.unit.is_half_degree else PRECISION_WHOLE
 
@@ -135,6 +137,7 @@ class CoolAutomationUnitEntity(
 
         Returns:
             int: int mask of supported features
+
         """
         supported = 0
         supported |= ClimateEntityFeature.TARGET_TEMPERATURE
@@ -239,7 +242,9 @@ class CoolAutomationUnitEntity(
 
     async def async_set_fan_mode(self, fan_mode: str) -> None:
         """Set new target fan mode.
+
         fan_mode: str - fan mode to set
+
         """
         if not self.unit.fan_modes:
             raise HomeAssistantError("Current mode doesn't support setting Fanlevel")
@@ -293,4 +298,4 @@ class CoolAutomationUnitEntity(
             self.coordinator._unschedule_refresh()
             self.async_write_ha_state()
         except Exception as error:
-            _LOGGER.error("Failed to set state for unit %: %", self.name, error)
+            _LOGGER.error(f"Failed to set state for unit {self.name}: {error}")
