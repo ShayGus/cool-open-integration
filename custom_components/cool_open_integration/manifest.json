@@ -14,6 +14,6 @@
     "cool-open-client==0.0.14"
   ],
   "ssdp": [],
-  "version": "0.0.4",
+  "version": "0.0.5",
   "zeroconf": []
 }
