@@ -143,6 +143,8 @@ class CoolAutomationUnitEntity(
         supported |= ClimateEntityFeature.TARGET_TEMPERATURE
         supported |= ClimateEntityFeature.FAN_MODE if self.unit.is_fan_mode else 0
         supported |= ClimateEntityFeature.SWING_MODE if self.unit.is_swing_mode else 0
+        supported |= ClimateEntityFeature.TURN_ON
+        supported |= ClimateEntityFeature.TURN_OFF
         return supported
 
     @property
