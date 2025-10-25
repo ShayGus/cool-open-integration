@@ -6,5 +6,6 @@ from homeassistant.const import Platform
 DOMAIN = "cool_open_integration"
 TITLE = "Cool Automation Cloud Open Integration"
 PLATFORMS = [Platform.CLIMATE]
-DEFAULT_SCAN_INTERVAL = 60
 TEMP_CELSIUS = "°C"
+REFRESH_DELAY = 3.0
+POLL_INTERVAL = 30

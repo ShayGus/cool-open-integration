@@ -1,14 +1,15 @@
+from __future__ import annotations
+
 from datetime import timedelta
 import logging
-from typing import List
 from homeassistant.config_entries import ConfigEntry
-
 from homeassistant.core import HomeAssistant
-from .const import DOMAIN, DEFAULT_SCAN_INTERVAL
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from cool_open_client.cool_automation_client import CoolAutomationClient
 from cool_open_client.unit import HVACUnit
+
+from .const import DOMAIN, POLL_INTERVAL
 
 _LOGGER = logging.getLogger(__package__)
 
@@ -16,10 +17,10 @@ _LOGGER = logging.getLogger(__package__)
 class CoolAutomationDataUpdateCoordinator(DataUpdateCoordinator):
     """Class to manage fetching Coolmaster data."""
 
-    data: list[HVACUnit]
+    data: dict[str, HVACUnit]
 
     def __init__(
-        self, hass: HomeAssistant, entry: ConfigEntry, client: CoolAutomationClient, units: List[HVACUnit]
+        self, hass: HomeAssistant, entry: ConfigEntry, client: CoolAutomationClient, units: list[HVACUnit]
     ) -> None:
         """Initialize global Coolmaster data updater."""
         _LOGGER.debug("Init Cool Automation update coordinator")
@@ -27,7 +28,7 @@ class CoolAutomationDataUpdateCoordinator(DataUpdateCoordinator):
         self.hass = hass
         self.units = units
 
-        super().__init__(hass, _LOGGER, name=DOMAIN, update_interval=timedelta(seconds=DEFAULT_SCAN_INTERVAL))
+        super().__init__(hass, _LOGGER, name=DOMAIN, update_interval=timedelta(seconds=POLL_INTERVAL))
 
     async def _async_update_data(self):
         """Fetch data from Coolmaster."""

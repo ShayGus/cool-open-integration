@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
-from cool_open_client.unit import HVACUnit, UnitCallback
+from cool_open_client.unit import HVACUnit
 
 from homeassistant.components.climate import ClimateEntity
 from homeassistant.components.climate.const import (
@@ -29,7 +30,7 @@ from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN
+from .const import DOMAIN, REFRESH_DELAY
 from .coordinator import CoolAutomationDataUpdateCoordinator
 
 # Fan Modes ['LOW', 'MEDIUM', 'HIGH', 'AUTO', 'TOP', 'VERYLOW']
@@ -62,7 +63,7 @@ _LOGGER = logging.getLogger(__package__)
 async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
-    """Set up the Sensibo climate entry."""
+    """Set up the climate entry."""
 
     coordinator: CoolAutomationDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
 
@@ -73,11 +74,10 @@ async def async_setup_entry(
 
     async_add_entities(entities)
     _LOGGER.debug("Entities added to HA")
-    coordinator.client.open_socket()
 
 
 class CoolAutomationUnitEntity(
-    CoordinatorEntity[CoolAutomationDataUpdateCoordinator], ClimateEntity, UnitCallback
+    CoordinatorEntity[CoolAutomationDataUpdateCoordinator], ClimateEntity
 ):
     """HVAC Entity of CoolAutomation controllable HVAC unit."""
 
@@ -103,7 +103,6 @@ class CoolAutomationUnitEntity(
         self._attr_temperature_unit = CELSIUS
         self._attr_supported_features = self.get_supported_features()
         self._attr_precision = self.get_precision()
-        self.unit.regiter_callback(self)
 
     @property
     def unit_data(self) -> HVACUnit:
@@ -118,10 +117,14 @@ class CoolAutomationUnitEntity(
     async def async_turn_on(self) -> None:
         """Turn HVAC unit on."""
         await self.unit.turn_on()
+        await asyncio.sleep(REFRESH_DELAY)
+        await self.coordinator.async_request_refresh()
 
     async def async_turn_off(self) -> None:
-        """Turn HVAC unit on."""
+        """Turn HVAC unit off."""
         await self.unit.turn_off()
+        await asyncio.sleep(REFRESH_DELAY)
+        await self.coordinator.async_request_refresh()
 
     def get_precision(self) -> float:
         """Get Temperature.
@@ -202,7 +205,7 @@ class CoolAutomationUnitEntity(
     def swing_modes(self) -> list[str] | None:
         """Return the list of available swing modes."""
         swing_modes = self.unit.swing_modes
-        return [mode.capitalize() for mode in swing_modes] if swing_modes else None
+        return [mode for mode in swing_modes] if swing_modes else None
 
     @property
     def min_temp(self) -> float:
@@ -231,9 +234,22 @@ class CoolAutomationUnitEntity(
             return
 
         new_temp = self._get_valid_temperature(temperature)
-        await self.unit.set_temperature_set_point(new_temp)
-        self._attr_target_temperature = new_temp
-        await self.async_assume_state()
+        try:
+            # API expects integer temperature as positional argument
+            await self.unit.set_temperature_set_point(int(new_temp))
+        except Exception as error:
+            _LOGGER.error("Failed to set temperature: %s", error)
+            # Check if this is the known API validation error
+            if "validation errors for UnitControlApi" in str(
+                error
+            ) and "unit_control_setpoints_body" in str(error):
+                raise HomeAssistantError(
+                    "API compatibility issue: The cool-open-client library needs to be updated. "
+                    "Please check for a newer version or report this issue."
+                ) from error
+            raise HomeAssistantError(f"Temperature setting failed: {error}") from error
+        await asyncio.sleep(REFRESH_DELAY)
+        await self.coordinator.async_request_refresh()
 
     def _get_valid_temperature(self, target: float) -> float:
         if target <= self.min_temp:
@@ -251,9 +267,26 @@ class CoolAutomationUnitEntity(
         if not self.unit.fan_modes:
             raise HomeAssistantError("Current mode doesn't support setting Fanlevel")
 
-        await self.unit.set_fan_mode(fan_mode.upper())
-        self._attr_fan_mode = fan_mode
-        await self.async_assume_state()
+        # Validate fan mode
+        if not fan_mode or not fan_mode.strip():
+            raise ValueError("Fan mode cannot be empty")
+
+        # Use exact mode strings from API - no case conversion
+        available_modes = list(self.unit.fan_modes)
+
+        if fan_mode not in available_modes:
+            raise ValueError(
+                f"Fan mode {fan_mode} is not valid. Valid fan modes are: {', '.join(available_modes)}"
+            )
+
+        try:
+            # Pass the exact mode string as provided by the API
+            await self.unit.set_fan_mode(fan_mode)
+        except Exception as error:
+            _LOGGER.error("Failed to set fan mode: %s", error)
+            raise HomeAssistantError(f"Fan mode setting failed: {error}") from error
+        await asyncio.sleep(REFRESH_DELAY)
+        await self.coordinator.async_request_refresh()
 
     async def async_set_swing_mode(self, swing_mode: str) -> None:
         """Set new target swing operation.
@@ -262,16 +295,17 @@ class CoolAutomationUnitEntity(
         if not self.unit.swing_modes:
             raise HomeAssistantError("Current mode doesn't support setting Fanlevel")
 
-        await self.unit.set_swing_mode(swing_mode.upper())
-        await self.async_assume_state()
+        await self.unit.set_swing_mode(swing_mode)
+        await asyncio.sleep(REFRESH_DELAY)
+        await self.coordinator.async_request_refresh()
 
     async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
         """Set new target operation mode."""
         turn_on = False
         if hvac_mode == HVACMode.OFF:
             await self.unit.turn_off()
-            self._attr_hvac_mode = hvac_mode
-            await self.async_assume_state()
+            await asyncio.sleep(REFRESH_DELAY)
+            await self.coordinator.async_request_refresh()
             return
         if self.hvac_mode == HVACMode.OFF:
             turn_on = True
@@ -282,22 +316,15 @@ class CoolAutomationUnitEntity(
         if not mode:
             raise ValueError("Unsupported mode was provided")
 
-        await self.unit.set_opration_mode(mode[0])
-        self._attr_hvac_mode = hvac_mode
+        try:
+            # API has typo in method name: set_opration_mode (missing 'e')
+            await self.unit.set_opration_mode(mode[0])
+        except Exception as error:
+            _LOGGER.error("Failed to set operation mode: %s", error)
+            raise HomeAssistantError(
+                f"Operation mode setting failed: {error}"
+            ) from error
         if turn_on:
             await self.unit.turn_on()
-        await self.async_assume_state()
-
-    def unit_update_callback(self) -> None:
-        """Update callback is part of the client, it will be invoked when an update to the unit occured"""
-        _LOGGER.debug("Unit update callback")
-        _LOGGER.debug(str(self.unit))
-        self._attr_current_temperature = self.unit.ambient_temperature
-        self.hass.create_task(self.async_assume_state())
-
-    async def async_assume_state(self) -> None:
-        try:
-            self.coordinator._unschedule_refresh()
-            self.async_write_ha_state()
-        except Exception as error:
-            _LOGGER.error(f"Failed to set state for unit {self.name}: {error}")
+        await asyncio.sleep(REFRESH_DELAY)
+        await self.coordinator.async_request_refresh()

@@ -8,12 +8,12 @@
   "dependencies": [],
   "documentation": "https://github.com/ShayGus/cool-open-integration/wiki",
   "homekit": {},
-  "iot_class": "cloud_push",
+  "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/ShayGus/cool-open-integration/issues",
   "requirements": [
-    "cool-open-client==0.0.14"
+    "cool-open-client==0.0.15"
   ],
   "ssdp": [],
-  "version": "0.0.5",
+  "version": "0.0.6",
   "zeroconf": []
 }
