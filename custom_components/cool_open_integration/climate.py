@@ -235,8 +235,8 @@ class CoolAutomationUnitEntity(
 
         new_temp = self._get_valid_temperature(temperature)
         try:
-            # API expects integer temperature as positional argument
-            await self.unit.set_temperature_set_point(int(new_temp))
+            # Let the client handle any rounding required by the API contract.
+            await self.unit.set_temperature_set_point(new_temp)
         except Exception as error:
             _LOGGER.error("Failed to set temperature: %s", error)
             # Check if this is the known API validation error
