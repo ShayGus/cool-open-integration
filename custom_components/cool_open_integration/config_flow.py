@@ -42,38 +42,19 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
     Data has the keys from STEP_USER_DATA_SCHEMA with values provided by the user.
     """
 
-    # If your PyPI package is not built with async, pass your methods
-    # to the executor:
-    # await hass.async_add_executor_job(
-    #     your_validate_func, data["username"], data["password"]
-    # )
-
     token = await CoolAutomationClient.authenticate(data["username"], data["password"])
 
     if token == "Unauthorized":
         raise InvalidAuth
 
     api: CoolAutomationClient = await CoolAutomationClient.create(token, logger=_LOGGER)
-    devices = await api.get_devices()
     me = await api.get_me()
-    id = me.id
 
-    if not devices:
-        raise Exception("No devices available")
-
-    # If you cannot connect:
-    # throw CannotConnect
-    # If the authentication is wrong:
-    # InvalidAuth
-
-    # Return info that you want to store in the config entry.
-    devices = [device.serial for device in devices]
     return {
         "username": data["username"],
         "password": data["password"],
         "token": token,
-        "devices": devices,
-        "id": id,
+        "id": me.id,
     }
 
 
