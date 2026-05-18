@@ -99,7 +99,7 @@ class CoolAutomationUnitEntity(
 
         self._client = coordinator.client
         self.unit: HVACUnit = coordinator.data[unit_id]
-        self._attr_unique_id = self.unit.name
+        self._attr_unique_id = self.unit.id
         self._attr_temperature_unit = CELSIUS
         self._attr_supported_features = self.get_supported_features()
         self._attr_precision = self.get_precision()
