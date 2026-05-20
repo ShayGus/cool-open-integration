@@ -95,3 +95,82 @@ async def test_missing_unit_in_bulk_response_keeps_last_known_state(hass):
     # unit-A got an update; unit-B did NOT have _update_unit called.
     units[0]._update_unit.assert_called_once()
     units[1]._update_unit.assert_not_called()
+
+
+from types import SimpleNamespace
+
+from custom_components.cool_open_integration import _ws_pump
+
+
+def _make_unit_update_event(unit_id: str):
+    """Stand-in for cool_open_client.ws_events.UnitUpdate; identity tested by isinstance against the real class."""
+    from cool_open_client.ws_events import UnitUpdate
+    msg = SimpleNamespace(unit_id=unit_id)
+    return UnitUpdate(msg)
+
+
+async def _aiter_from(events):
+    for ev in events:
+        yield ev
+
+
+@pytest.mark.asyncio
+async def test_ws_pump_routes_unit_update_to_in_memory_unit(hass):
+    units = [_make_unit("unit-A"), _make_unit("unit-B")]
+    client = MagicMock()
+    client.subscribe_unit_updates = MagicMock(
+        return_value=_aiter_from([_make_unit_update_event("unit-A")])
+    )
+
+    entry = MagicMock()
+    coordinator = CoolAutomationDataUpdateCoordinator(hass, entry, client, units)
+    coordinator.data = {u.id: u for u in units}
+    coordinator.async_set_updated_data = MagicMock()
+
+    await _ws_pump(coordinator)
+
+    # unit-A got the WS update; unit-B was untouched.
+    units[0]._update_unit.assert_called_once()
+    units[1]._update_unit.assert_not_called()
+    # Coordinator was notified.
+    coordinator.async_set_updated_data.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_ws_pump_reconnected_triggers_refresh(hass):
+    from cool_open_client.ws_events import Reconnected
+
+    units = [_make_unit("unit-A")]
+    client = MagicMock()
+    client.subscribe_unit_updates = MagicMock(return_value=_aiter_from([Reconnected()]))
+
+    entry = MagicMock()
+    coordinator = CoolAutomationDataUpdateCoordinator(hass, entry, client, units)
+    coordinator.data = {u.id: u for u in units}
+    coordinator.async_request_refresh = AsyncMock()
+
+    await _ws_pump(coordinator)
+
+    coordinator.async_request_refresh.assert_awaited_once()
+    # No UnitUpdate, so no _update_unit call.
+    units[0]._update_unit.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_ws_pump_unknown_unit_id_ignored(hass):
+    units = [_make_unit("unit-A")]
+    client = MagicMock()
+    client.subscribe_unit_updates = MagicMock(
+        return_value=_aiter_from([_make_unit_update_event("unit-NEW")])
+    )
+
+    entry = MagicMock()
+    coordinator = CoolAutomationDataUpdateCoordinator(hass, entry, client, units)
+    coordinator.data = {u.id: u for u in units}
+    coordinator.async_set_updated_data = MagicMock()
+
+    # Must not raise.
+    await _ws_pump(coordinator)
+
+    units[0]._update_unit.assert_not_called()
+    coordinator.async_set_updated_data.assert_not_called()
