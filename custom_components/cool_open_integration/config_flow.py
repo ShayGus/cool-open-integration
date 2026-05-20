@@ -18,6 +18,7 @@ from homeassistant.helpers.schema_config_entry_flow import (
 from collections.abc import Mapping
 
 from cool_open_client.cool_automation_client import CoolAutomationClient
+from homeassistant.util.ssl import client_context
 
 from .const import DOMAIN, TITLE
 
@@ -42,12 +43,17 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
     Data has the keys from STEP_USER_DATA_SCHEMA with values provided by the user.
     """
 
-    token = await CoolAutomationClient.authenticate(data["username"], data["password"])
+    ssl_ctx = await hass.async_add_executor_job(client_context)
+    token = await CoolAutomationClient.authenticate(
+        data["username"], data["password"], ssl_context=ssl_ctx
+    )
 
     if token == "Unauthorized":
         raise InvalidAuth
 
-    api: CoolAutomationClient = await CoolAutomationClient.create(token, logger=_LOGGER)
+    api: CoolAutomationClient = await CoolAutomationClient.create(
+        token, logger=_LOGGER, ssl_context=ssl_ctx
+    )
     me = await api.get_me()
 
     return {
