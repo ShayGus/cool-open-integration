@@ -5,6 +5,7 @@ import logging
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
+from homeassistant.util.ssl import client_context
 
 from cool_open_client.hvac_units_factory import HVACUnitsFactory
 from cool_open_client.cool_automation_client import (
@@ -33,9 +34,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     #     return bool(hass.config_entries.async_entries(DOMAIN))
 
     _LOGGER.debug("async setup")
+    # Build the SSL context off the event loop once, then thread it through
+    # every cool-open-client call site so the library never blocks the loop
+    # reading the system CA bundle.
+    ssl_ctx = await hass.async_add_executor_job(client_context)
     token = entry.data["token"]
     try:
-        client = await CoolAutomationClient.create(token=token)
+        client = await CoolAutomationClient.create(token=token, ssl_context=ssl_ctx)
     except OSError as error:
         raise ConfigEntryNotReady() from error
     except InvalidTokenException as error:
@@ -43,11 +48,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         username = entry.data["username"]
         password = entry.data["password"]
         try:
-            token = await CoolAutomationClient.authenticate(username, password)
+            token = await CoolAutomationClient.authenticate(
+                username, password, ssl_context=ssl_ctx
+            )
             hass.config_entries.async_update_entry(
                 entry, data={"username": username, "password": password, "token": token}
             )
-            client = await CoolAutomationClient.create(token=token)
+            client = await CoolAutomationClient.create(token=token, ssl_context=ssl_ctx)
         except Exception as error:
             _LOGGER.error("Can't authenticate, wrong credentials: %s", error)
             raise ConfigEntryAuthFailed(
@@ -57,7 +64,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         _LOGGER.error("General Error: %s", error)
         raise ConfigEntryNotReady() from error
     try:
-        units_factory = await HVACUnitsFactory.create(token=token)
+        units_factory = await HVACUnitsFactory.create(token=token, ssl_context=ssl_ctx)
         units = await units_factory.generate_units_from_api()
         if not units:
             raise ConfigEntryNotReady
