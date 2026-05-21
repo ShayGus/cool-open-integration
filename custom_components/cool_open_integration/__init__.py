@@ -83,7 +83,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 username, password, ssl_context=ssl_ctx
             )
             hass.config_entries.async_update_entry(
-                entry, data={"username": username, "password": password, "token": token}
+                entry, data={**entry.data, "token": token}
             )
             client = await CoolAutomationClient.create(token=token, ssl_context=ssl_ctx)
         except Exception as error:
