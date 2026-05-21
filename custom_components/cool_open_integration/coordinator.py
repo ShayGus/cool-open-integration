@@ -9,7 +9,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from cool_open_client.cool_automation_client import CoolAutomationClient
 from cool_open_client.unit import HVACUnit
 
-from .const import DOMAIN, POLL_INTERVAL
+from .const import DOMAIN, RECONCILE_INTERVAL_MINUTES
 
 _LOGGER = logging.getLogger(__package__)
 
@@ -28,7 +28,12 @@ class CoolAutomationDataUpdateCoordinator(DataUpdateCoordinator):
         self.hass = hass
         self.units = units
 
-        super().__init__(hass, _LOGGER, name=DOMAIN, update_interval=timedelta(seconds=POLL_INTERVAL))
+        super().__init__(
+            hass,
+            _LOGGER,
+            name=DOMAIN,
+            update_interval=timedelta(minutes=RECONCILE_INTERVAL_MINUTES),
+        )
 
     async def _async_update_data(self):
         """Fetch data from Coolmaster.
@@ -52,9 +57,9 @@ class CoolAutomationDataUpdateCoordinator(DataUpdateCoordinator):
         for unit in self.units:
             message = updates.get(unit.id)
             if message is not None:
-                # with_callback=False matches the prior unit.refresh() behaviour:
-                # the coordinator notifies listeners itself.
-                unit._update_unit(message, with_callback=False)
+                # The coordinator notifies listeners itself; the library no longer
+                # exposes a with_callback parameter on _update_unit.
+                unit._update_unit(message)
             # A unit absent from the bulk response keeps its last-known state.
             data[unit.id] = unit
             unit.reset_update()

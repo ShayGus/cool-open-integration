@@ -1,6 +1,7 @@
 """The CoolAutomation Cloud Open Integration integration."""
 from __future__ import annotations
 
+import asyncio
 import logging
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -12,6 +13,7 @@ from cool_open_client.cool_automation_client import (
     CoolAutomationClient,
     InvalidTokenException,
 )
+from cool_open_client.ws_events import Reconnected, UnitUpdate
 
 from .const import DOMAIN, PLATFORMS
 from .coordinator import CoolAutomationDataUpdateCoordinator
@@ -20,6 +22,35 @@ from .coordinator import CoolAutomationDataUpdateCoordinator
 # For your initial PR, limit it to 1 platform.
 
 _LOGGER = logging.getLogger(__name__)
+
+
+async def _ws_pump(coordinator: "CoolAutomationDataUpdateCoordinator") -> None:
+    """Forever-loop consumer of the library's WS event stream.
+
+    Mutates in-memory `HVACUnit` instances per `UnitUpdate` and triggers a
+    bulk reconcile on each `Reconnected`. Cancellation propagates so HA
+    can stop us cleanly during entry unload.
+    """
+    client = coordinator.client
+    units_by_id = {u.id: u for u in coordinator.units}
+
+    try:
+        async for event in client.subscribe_unit_updates():
+            if isinstance(event, UnitUpdate):
+                unit = units_by_id.get(event.message.unit_id)
+                if unit is None:
+                    continue
+                unit._update_unit(event.message)
+                coordinator.async_set_updated_data(coordinator.data)
+            elif isinstance(event, Reconnected):
+                await coordinator.async_request_refresh()
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        _LOGGER.exception(
+            "WS pump terminated unexpectedly; entry will rely on the "
+            "5-minute reconciliation poll until reload",
+        )
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -80,6 +111,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     coordinator = CoolAutomationDataUpdateCoordinator(hass, entry, client, units)
     await coordinator.async_config_entry_first_refresh()
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
+    entry.async_create_background_task(
+        hass,
+        _ws_pump(coordinator),
+        name=f"{DOMAIN}_ws_pump",
+    )
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     # hass.config_entries.async_setup_platforms(entry, PLATFORMS)
     return True
