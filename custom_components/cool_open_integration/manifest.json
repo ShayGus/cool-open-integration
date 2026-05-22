@@ -11,9 +11,9 @@
   "iot_class": "cloud_push",
   "issue_tracker": "https://github.com/ShayGus/cool-open-integration/issues",
   "requirements": [
-    "cool-open-client==0.0.21"
+    "cool-open-client==0.0.22"
   ],
   "ssdp": [],
-  "version": "0.0.17",
+  "version": "0.0.18",
   "zeroconf": []
 }
