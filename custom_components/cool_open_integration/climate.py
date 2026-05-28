@@ -158,14 +158,16 @@ class CoolAutomationUnitEntity(
     def hvac_mode(self) -> HVACMode:
         """Return hvac operation."""
         if self.unit.is_on:
-            return OPEN_CLIENT_TO_HA_MODES[self.unit.operation_mode]
+            return OPEN_CLIENT_TO_HA_MODES.get(self.unit.operation_mode, HVACMode.OFF)
         return HVACMode.OFF
 
     @property
     def hvac_modes(self) -> list[HVACMode]:
         """Return the list of available hvac operation modes."""
         hvac_modes = [
-            OPEN_CLIENT_TO_HA_MODES[mode] for mode in self.unit.operation_modes
+            OPEN_CLIENT_TO_HA_MODES[mode]
+            for mode in self.unit.operation_modes
+            if mode in OPEN_CLIENT_TO_HA_MODES
         ]
         hvac_modes.append(HVACMode.OFF)
         return hvac_modes if hvac_modes else [HVACMode.OFF]
@@ -188,7 +190,7 @@ class CoolAutomationUnitEntity(
     @property
     def fan_mode(self) -> str | None:
         """Return the fan setting."""
-        return self.unit.fan_mode.capitalize()
+        return self.unit.fan_mode.capitalize() if self.unit.fan_mode else None
 
     @property
     def fan_modes(self) -> list[str] | None:
@@ -199,7 +201,7 @@ class CoolAutomationUnitEntity(
     @property
     def swing_mode(self) -> str | None:
         """Return the fan setting."""
-        return self.unit.swing_mode.capitalize()
+        return self.unit.swing_mode.capitalize() if self.unit.swing_mode else None
 
     @property
     def swing_modes(self) -> list[str] | None:
