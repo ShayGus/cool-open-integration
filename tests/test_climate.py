@@ -27,6 +27,24 @@ RAW_FAN_MODES = ["LOW", "MEDIUM", "HIGH", "AUTO", "TOP", "VERYLOW"]
 # `swing_modes` property (no case conversion, unlike fan modes).
 RAW_SWING_MODES = ["vertical", "30", "45", "60", "horizontal", "auto"]
 
+# Full real API enum (from a live CoolAutomation response). Supersets the
+# subsets above with the extended/hyphenated fan modes ('SHIGH', 'FU-LO',
+# 'FU-HI', 'OFF') and the swing 'off'/'on' states not exercised above.
+FULL_REAL_FAN_MODES = [
+    "LOW", "MEDIUM", "HIGH", "AUTO", "TOP",
+    "VERYLOW", "SHIGH", "FU-LO", "FU-HI", "OFF",
+]
+FULL_REAL_SWING_MODES = [
+    "vertical", "30", "45", "60", "horizontal", "auto", "off", "on",
+]
+# Exact display strings the `fan_modes` property must expose to HA (the
+# `.capitalize()` of each raw mode). Hardcoded so a change to the display
+# transform reddens the test instead of mirroring the implementation.
+FULL_REAL_FAN_DISPLAY = [
+    "Low", "Medium", "High", "Auto", "Top",
+    "Verylow", "Shigh", "Fu-lo", "Fu-hi", "Off",
+]
+
 
 @pytest.fixture(autouse=True)
 def _no_refresh_delay():
@@ -248,3 +266,96 @@ async def test_swing_client_failure_is_wrapped_in_home_assistant_error():
 
     with pytest.raises(HomeAssistantError):
         await entity.async_set_swing_mode("vertical")
+
+
+# ---------------------------------------------------------------------------
+# Full real-enum coverage.
+#
+# The subsets above pin the fix; these exercise the *complete* mode list from a
+# live API response, including the extended/hyphenated fan modes ('SHIGH',
+# 'FU-LO', 'FU-HI', 'OFF') and the swing 'off'/'on' states. The hyphenated fan
+# modes are the sharp case: '.capitalize()' lowercases everything after the
+# first letter ('FU-LO' -> 'Fu-lo'), and the set path must '.upper()' it back
+# to the raw 'FU-LO' the client expects.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("raw_mode", FULL_REAL_FAN_MODES)
+async def test_full_fan_enum_display_round_trips_to_raw(raw_mode):
+    """Every real fan mode's display form reaches the client as its raw mode.
+
+    Covers the extended modes the subset test omits: 'SHIGH', 'FU-LO',
+    'FU-HI' and 'OFF'.
+    """
+    entity = _make_entity(fan_modes=list(FULL_REAL_FAN_MODES))
+
+    display_value = raw_mode.capitalize()
+    # Guard: the property must actually expose this display value to HA.
+    assert display_value in entity.fan_modes
+
+    await entity.async_set_fan_mode(display_value)
+
+    entity.unit.set_fan_mode.assert_awaited_once_with(raw_mode)
+
+
+@pytest.mark.parametrize(
+    "display_value, raw_mode",
+    [("Fu-lo", "FU-LO"), ("Fu-hi", "FU-HI")],
+)
+async def test_hyphenated_fan_display_survives_round_trip(display_value, raw_mode):
+    """The hyphen survives the capitalize/upper round-trip.
+
+    'Fu-lo'/'Fu-hi' (the display forms) must normalize back to the raw
+    'FU-LO'/'FU-HI' the client expects, hyphen intact.
+    """
+    entity = _make_entity(fan_modes=list(FULL_REAL_FAN_MODES))
+
+    assert display_value in entity.fan_modes
+
+    await entity.async_set_fan_mode(display_value)
+
+    entity.unit.set_fan_mode.assert_awaited_once_with(raw_mode)
+
+
+async def test_fan_modes_property_exposes_full_capitalized_forms():
+    """The property exposes exactly the capitalized display strings for HA.
+
+    Pinned to a hardcoded expected list (not a mirror of the implementation)
+    so any change to the display transform — including the hyphenated
+    'Fu-lo'/'Fu-hi' and 'Shigh'/'Verylow'/'Off' — reddens this test.
+    """
+    entity = _make_entity(fan_modes=list(FULL_REAL_FAN_MODES))
+
+    assert entity.fan_modes == FULL_REAL_FAN_DISPLAY
+
+
+@pytest.mark.parametrize("mode", FULL_REAL_SWING_MODES)
+async def test_full_swing_enum_reaches_client_verbatim(mode):
+    """Every real swing mode passes through unchanged, incl. 'off'/'on'.
+
+    The subset test omits the 'off'/'on' states; swing does no case
+    normalization, so each list value must reach the client verbatim.
+    """
+    entity = _make_entity(swing_modes=list(FULL_REAL_SWING_MODES))
+
+    # Guard: the property must actually offer this value to HA.
+    assert mode in entity.swing_modes
+
+    await entity.async_set_swing_mode(mode)
+
+    entity.unit.set_swing_mode.assert_awaited_once_with(mode)
+
+
+@pytest.mark.parametrize("current", ["off", "on"])
+async def test_current_swing_mode_off_on_raw_and_in_list(current):
+    """The active 'off'/'on' swing value is returned raw and matches the list.
+
+    These two states were untested; like the other modes they must be
+    returned unchanged so the active option highlights in the UI.
+    """
+    entity = _make_entity(
+        swing_modes=list(FULL_REAL_SWING_MODES), swing_mode=current
+    )
+
+    assert entity.swing_mode == current
+    assert entity.swing_mode in entity.swing_modes
