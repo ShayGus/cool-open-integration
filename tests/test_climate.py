@@ -23,6 +23,10 @@ from custom_components.cool_open_integration.climate import CoolAutomationUnitEn
 # exposes them title-cased via `str.capitalize()`.
 RAW_FAN_MODES = ["LOW", "MEDIUM", "HIGH", "AUTO", "TOP", "VERYLOW"]
 
+# The API's swing modes are LOWERCASE raw strings, exposed verbatim by the
+# `swing_modes` property (no case conversion, unlike fan modes).
+RAW_SWING_MODES = ["vertical", "30", "45", "60", "horizontal", "auto"]
+
 
 @pytest.fixture(autouse=True)
 def _no_refresh_delay():
@@ -33,16 +37,25 @@ def _no_refresh_delay():
         yield
 
 
-def _make_entity(fan_modes=None, set_fan_mode=None):
+def _make_entity(
+    fan_modes=None,
+    set_fan_mode=None,
+    swing_modes=None,
+    set_swing_mode=None,
+    swing_mode=None,
+):
     """Build a CoolAutomationUnitEntity isolated to the method under test.
 
     Bypasses the heavy __init__ (which reads coordinator.data/client and
     builds DeviceInfo) and wires only `unit` and `coordinator`, which is all
-    async_set_fan_mode touches.
+    the fan- and swing-mode methods and properties touch.
     """
     unit = MagicMock()
     unit.fan_modes = list(RAW_FAN_MODES) if fan_modes is None else fan_modes
     unit.set_fan_mode = AsyncMock() if set_fan_mode is None else set_fan_mode
+    unit.swing_modes = list(RAW_SWING_MODES) if swing_modes is None else swing_modes
+    unit.swing_mode = swing_mode
+    unit.set_swing_mode = AsyncMock() if set_swing_mode is None else set_swing_mode
 
     coordinator = MagicMock()
     coordinator.async_request_refresh = AsyncMock()
@@ -127,3 +140,111 @@ async def test_client_failure_is_wrapped_in_home_assistant_error():
 
     with pytest.raises(HomeAssistantError):
         await entity.async_set_fan_mode("Medium")
+
+
+# ---------------------------------------------------------------------------
+# Swing-mode regression tests.
+#
+# The API's swing modes are LOWERCASE raw strings (e.g. "vertical", "30",
+# "horizontal"). Unlike fan mode, swing does NOT normalize case: the value HA
+# sends (an exact entry from the `swing_modes` list) must reach the client
+# verbatim. The fix also removed a `.capitalize()` on the current value so the
+# active option matches a list entry and highlights in the UI.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("mode", RAW_SWING_MODES)
+async def test_swing_value_reaches_client_verbatim(mode):
+    """Every swing option passes through to the client unchanged.
+
+    Swing must NOT normalize case (unlike fan mode). HA sends the exact
+    lowercase/numeric list value and it must reach set_swing_mode verbatim,
+    including numeric strings ('30'/'45'/'60') and 'horizontal'/'auto'.
+    """
+    entity = _make_entity()
+
+    await entity.async_set_swing_mode(mode)
+
+    entity.unit.set_swing_mode.assert_awaited_once_with(mode)
+
+
+async def test_swing_value_is_stripped_before_send():
+    """Surrounding whitespace is trimmed before validation and send.
+
+    '  vertical  ' must validate against the raw list and reach the client as
+    the stripped 'vertical' (still with no case change).
+    """
+    entity = _make_entity()
+
+    await entity.async_set_swing_mode("  vertical  ")
+
+    entity.unit.set_swing_mode.assert_awaited_once_with("vertical")
+
+
+@pytest.mark.parametrize("current", ["vertical", "horizontal"])
+async def test_current_swing_mode_is_raw_and_matches_list(current):
+    """The active swing value is returned raw and matches a list entry.
+
+    The fix removed a .capitalize() on the current value; a capitalized
+    'Vertical' would not match the lowercase 'vertical' in swing_modes, so the
+    active option would fail to highlight in the UI.
+    """
+    entity = _make_entity(swing_mode=current)
+
+    assert entity.swing_mode == current
+    assert entity.swing_mode in entity.swing_modes
+
+
+async def test_successful_swing_set_requests_coordinator_refresh():
+    """A successful swing set triggers a coordinator refresh."""
+    entity = _make_entity()
+
+    await entity.async_set_swing_mode("auto")
+
+    entity.coordinator.async_request_refresh.assert_awaited_once()
+
+
+@pytest.mark.parametrize("bad_mode", ["Vertical", "diagonal"])
+async def test_invalid_swing_mode_raises_value_error_without_calling_client(bad_mode):
+    """Swing is exact-match/case-sensitive: wrong case or unknown is rejected.
+
+    'Vertical' (capitalized) is invalid because swing does no normalization;
+    'diagonal' is simply not offered. Neither reaches the client.
+    """
+    entity = _make_entity()
+
+    with pytest.raises(ValueError):
+        await entity.async_set_swing_mode(bad_mode)
+
+    entity.unit.set_swing_mode.assert_not_awaited()
+
+
+@pytest.mark.parametrize("bad_value", ["", "   "])
+async def test_empty_or_whitespace_swing_raises_value_error(bad_value):
+    """Empty or whitespace-only swing input is rejected as invalid."""
+    entity = _make_entity()
+
+    with pytest.raises(ValueError):
+        await entity.async_set_swing_mode(bad_value)
+
+    entity.unit.set_swing_mode.assert_not_awaited()
+
+
+async def test_no_swing_support_raises_home_assistant_error():
+    """When the current mode exposes no swing modes, surface a HA error."""
+    entity = _make_entity(swing_modes=[])
+
+    with pytest.raises(HomeAssistantError):
+        await entity.async_set_swing_mode("vertical")
+
+    entity.unit.set_swing_mode.assert_not_awaited()
+
+
+async def test_swing_client_failure_is_wrapped_in_home_assistant_error():
+    """A failure from the client is re-raised as a HomeAssistantError."""
+    entity = _make_entity(
+        set_swing_mode=AsyncMock(side_effect=Exception("boom"))
+    )
+
+    with pytest.raises(HomeAssistantError):
+        await entity.async_set_swing_mode("vertical")

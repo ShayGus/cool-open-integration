@@ -200,8 +200,8 @@ class CoolAutomationUnitEntity(
 
     @property
     def swing_mode(self) -> str | None:
-        """Return the fan setting."""
-        return self.unit.swing_mode.capitalize() if self.unit.swing_mode else None
+        """Return the current swing setting."""
+        return self.unit.swing_mode if self.unit.swing_mode else None
 
     @property
     def swing_modes(self) -> list[str] | None:
@@ -296,9 +296,26 @@ class CoolAutomationUnitEntity(
         swing_mode: str - swing mode to set
         """
         if not self.unit.swing_modes:
-            raise HomeAssistantError("Current mode doesn't support setting Fanlevel")
+            raise HomeAssistantError("Current mode doesn't support setting swing mode")
 
-        await self.unit.set_swing_mode(swing_mode)
+        if not swing_mode or not swing_mode.strip():
+            raise ValueError("Swing mode cannot be empty")
+
+        # Swing modes are lowercase and exposed verbatim by `swing_modes`, so
+        # unlike fan modes no case normalization is needed — only strip stray
+        # whitespace so validation and the sent value stay consistent.
+        normalized = swing_mode.strip()
+        available_modes = list(self.unit.swing_modes)
+        if normalized not in available_modes:
+            raise ValueError(
+                f"Swing mode {swing_mode} is not valid. Valid swing modes are: {', '.join(available_modes)}"
+            )
+
+        try:
+            await self.unit.set_swing_mode(normalized)
+        except Exception as error:
+            _LOGGER.error("Failed to set swing mode: %s", error)
+            raise HomeAssistantError(f"Swing mode setting failed: {error}") from error
         await asyncio.sleep(REFRESH_DELAY)
         await self.coordinator.async_request_refresh()
 
