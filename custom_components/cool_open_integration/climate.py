@@ -273,17 +273,22 @@ class CoolAutomationUnitEntity(
         if not fan_mode or not fan_mode.strip():
             raise ValueError("Fan mode cannot be empty")
 
-        # Use exact mode strings from API - no case conversion
+        # HA is served capitalized mode names (see fan_modes property), so map
+        # the incoming value back to the API's mode string case-insensitively.
         available_modes = list(self.unit.fan_modes)
+        api_mode = next(
+            (mode for mode in available_modes if mode.casefold() == fan_mode.casefold()),
+            None,
+        )
 
-        if fan_mode not in available_modes:
+        if api_mode is None:
             raise ValueError(
-                f"Fan mode {fan_mode} is not valid. Valid fan modes are: {', '.join(available_modes)}"
+                f"Fan mode {fan_mode} is not valid. Valid fan modes are: "
+                f"{', '.join(mode.capitalize() for mode in available_modes)}"
             )
 
         try:
-            # Pass the exact mode string as provided by the API
-            await self.unit.set_fan_mode(fan_mode)
+            await self.unit.set_fan_mode(api_mode)
         except Exception as error:
             _LOGGER.error("Failed to set fan mode: %s", error)
             raise HomeAssistantError(f"Fan mode setting failed: {error}") from error
