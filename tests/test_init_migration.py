@@ -223,3 +223,57 @@ async def test_falsy_unit_name_skipped(hass):
     assert registry.async_get_entity_id(CLIMATE, DOMAIN, "unit-x") == ent.entity_id
     assert registry.async_get(ent.entity_id).name == "Kept"
     assert len(registry.entities) == 1
+
+
+# --- WS endpoint override -----------------------------------------------
+
+
+def test_ws_endpoint_override_points_at_the_host_that_serves_the_socket():
+    """cool-open-client ships the REST host, which 404s on the WS handshake.
+
+    Verified against the live API with a raw HTTP/1.1 upgrade:
+    `ws.coolremote.net/ws/v2` answers 101, `api.coolremote.net/ws/v2` answers
+    404 NOT_FOUND_2. Drop this test together with the override once the fix
+    is released upstream.
+    """
+    from cool_open_client.cool_automation_client import CoolAutomationClient
+
+    from custom_components.cool_open_integration import _apply_ws_endpoint_override
+    from custom_components.cool_open_integration.const import WS_URL
+
+    original = CoolAutomationClient.SOCKET_URI
+    try:
+        _apply_ws_endpoint_override()
+        assert CoolAutomationClient.SOCKET_URI == WS_URL
+        assert WS_URL.startswith("wss://ws.coolremote.net/")
+    finally:
+        CoolAutomationClient.SOCKET_URI = original
+
+
+def test_library_stdout_handler_is_removed_so_ha_logger_config_applies():
+    import logging
+
+    from custom_components.cool_open_integration import _quiet_library_stdout_logging
+
+    library_logger = logging.getLogger("cool_open_client")
+    original_handlers = list(library_logger.handlers)
+    original_level = library_logger.level
+    try:
+        import sys
+
+        library_logger.addHandler(logging.StreamHandler(sys.stdout))
+        library_logger.setLevel(logging.WARNING)
+
+        _quiet_library_stdout_logging()
+
+        assert not [
+            h
+            for h in library_logger.handlers
+            if isinstance(h, logging.StreamHandler)
+            and not isinstance(h, logging.FileHandler)
+            and getattr(h, "stream", None) in (sys.stdout, sys.stderr)
+        ]
+        assert library_logger.level == logging.NOTSET
+    finally:
+        library_logger.handlers = original_handlers
+        library_logger.setLevel(original_level)

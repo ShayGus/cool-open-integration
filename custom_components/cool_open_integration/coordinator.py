@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import timedelta
 import logging
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from cool_open_client.cool_automation_client import CoolAutomationClient
@@ -27,6 +27,10 @@ class CoolAutomationDataUpdateCoordinator(DataUpdateCoordinator):
         self._client = client
         self.hass = hass
         self.units = units
+        # Which unit the most recent notification is about, so entities can
+        # skip re-writing state for units that did not change. `None` means
+        # "all of them" — that is what a reconciliation poll produces.
+        self.last_pushed_unit_id: str | None = None
 
         super().__init__(
             hass,
@@ -43,6 +47,7 @@ class CoolAutomationDataUpdateCoordinator(DataUpdateCoordinator):
         instances. Replaces the previous per-unit fan-out which caused
         excessive API traffic on large installations.
         """
+        self.last_pushed_unit_id = None
         try:
             updates = await self._client.get_updated_controllable_units()
         except OSError as error:
@@ -64,6 +69,20 @@ class CoolAutomationDataUpdateCoordinator(DataUpdateCoordinator):
             data[unit.id] = unit
             unit.reset_update()
         return data
+
+    @callback
+    def async_push_unit_update(self, unit_id: str) -> None:
+        """Notify listeners about a single unit that changed over the WS.
+
+        Deliberately `async_update_listeners` and not `async_set_updated_data`:
+        the latter reschedules the update timer, so a steady push stream would
+        keep pushing the 5-minute reconciliation poll into the future and the
+        drift safety net would never actually run. The `HVACUnit` instances in
+        `self.data` are mutated in place, so there is no new data to hand over
+        — only listeners to notify.
+        """
+        self.last_pushed_unit_id = unit_id
+        self.async_update_listeners()
 
     @property
     def client(self):

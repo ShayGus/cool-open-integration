@@ -3,6 +3,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import sys
+from contextlib import aclosing
+
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
@@ -17,7 +20,13 @@ from cool_open_client.cool_automation_client import (
 )
 from cool_open_client.ws_events import Reconnected, UnitUpdate
 
-from .const import DOMAIN, PLATFORMS
+from .const import (
+    DOMAIN,
+    PLATFORMS,
+    WS_STALLED_BACKOFF_CAP_SECONDS,
+    WS_STALLED_RECONNECT_LIMIT,
+    WS_URL,
+)
 from .coordinator import CoolAutomationDataUpdateCoordinator
 
 # TODO List the platforms that you want to support.
@@ -26,26 +35,99 @@ from .coordinator import CoolAutomationDataUpdateCoordinator
 _LOGGER = logging.getLogger(__name__)
 
 
-async def _ws_pump(coordinator: "CoolAutomationDataUpdateCoordinator") -> None:
+def _apply_ws_endpoint_override() -> None:
+    """Point the library at the host that actually serves the WebSocket.
+
+    cool-open-client <= 0.0.22 uses the REST host for the WS URL, which 404s
+    on every handshake. See `WS_URL` in const.py for the evidence. Remove this
+    once the fix ships upstream and the `manifest.json` pin is raised.
+    """
+    if CoolAutomationClient.SOCKET_URI != WS_URL:
+        _LOGGER.info(
+            "Overriding cool-open-client WS endpoint %s -> %s",
+            CoolAutomationClient.SOCKET_URI,
+            WS_URL,
+        )
+        CoolAutomationClient.SOCKET_URI = WS_URL
+
+
+def _quiet_library_stdout_logging() -> None:
+    """Give HA's `logger:` config control over the library's output.
+
+    `cool_open_client` attaches its own `StreamHandler(sys.stdout)` at import
+    time and pins the level to WARNING, while leaving propagation on. Every
+    record therefore lands twice and cannot be silenced from configuration.yaml.
+    Drop the handler it added and hand the level back to HA.
+    """
+    library_logger = logging.getLogger("cool_open_client")
+    for handler in list(library_logger.handlers):
+        if isinstance(handler, logging.StreamHandler) and not isinstance(
+            handler, logging.FileHandler
+        ):
+            if getattr(handler, "stream", None) in (sys.stdout, sys.stderr):
+                library_logger.removeHandler(handler)
+    library_logger.setLevel(logging.NOTSET)
+
+
+async def _ws_pump(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    coordinator: "CoolAutomationDataUpdateCoordinator",
+) -> None:
     """Forever-loop consumer of the library's WS event stream.
 
     Mutates in-memory `HVACUnit` instances per `UnitUpdate` and triggers a
     bulk reconcile on each `Reconnected`. Cancellation propagates so HA
     can stop us cleanly during entry unload.
+
+    A run of `Reconnected` events with no `UnitUpdate` between them means the
+    server keeps hanging up on us right after the handshake — in practice, a
+    token it will not accept. The library reports that clean close as success,
+    so its internal backoff stays at one second and it would spin as fast as
+    the network allows, firing a bulk HTTP refresh each time round. Because an
+    async generator only runs while someone is pulling from it, sleeping here
+    is what actually paces the library's reconnect loop.
     """
     client = coordinator.client
     units_by_id = {u.id: u for u in coordinator.units}
+    stalled_reconnects = 0
 
     try:
-        async for event in client.subscribe_unit_updates():
-            if isinstance(event, UnitUpdate):
-                unit = units_by_id.get(event.message.unit_id)
-                if unit is None:
-                    continue
-                unit._update_unit(event.message)
-                coordinator.async_set_updated_data(coordinator.data)
-            elif isinstance(event, Reconnected):
-                await coordinator.async_request_refresh()
+        async with aclosing(client.subscribe_unit_updates()) as stream:
+            async for event in stream:
+                if isinstance(event, UnitUpdate):
+                    stalled_reconnects = 0
+                    unit = units_by_id.get(event.message.unit_id)
+                    if unit is None:
+                        continue
+                    unit._update_unit(event.message)
+                    coordinator.async_push_unit_update(unit.id)
+                elif isinstance(event, Reconnected):
+                    stalled_reconnects += 1
+                    if stalled_reconnects >= WS_STALLED_RECONNECT_LIMIT:
+                        _LOGGER.error(
+                            "WS reconnected %d times without receiving any unit "
+                            "update; the server is most likely rejecting our "
+                            "token. Stopping the WS pump and asking for "
+                            "reauthentication; the 5-minute reconciliation poll "
+                            "keeps entities alive meanwhile",
+                            stalled_reconnects,
+                        )
+                        entry.async_start_reauth(hass)
+                        return
+                    await coordinator.async_request_refresh()
+                    if stalled_reconnects > 1:
+                        delay = min(
+                            2.0 ** (stalled_reconnects - 1),
+                            WS_STALLED_BACKOFF_CAP_SECONDS,
+                        )
+                        _LOGGER.debug(
+                            "WS reconnect #%d delivered no data; holding the "
+                            "stream for %.0fs before reconnecting",
+                            stalled_reconnects,
+                            delay,
+                        )
+                        await asyncio.sleep(delay)
     except asyncio.CancelledError:
         raise
     except Exception:
@@ -142,6 +224,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     #     return bool(hass.config_entries.async_entries(DOMAIN))
 
     _LOGGER.debug("async setup")
+    _apply_ws_endpoint_override()
+    _quiet_library_stdout_logging()
+
+    # `CoolAutomationClient` is a process-wide singleton whose `create()`
+    # reassigns `self.token`, so a second account would silently take over the
+    # first one's session. Warn rather than corrupt state in silence.
+    if len(hass.config_entries.async_entries(DOMAIN)) > 1:
+        _LOGGER.warning(
+            "More than one CoolAutomation entry is configured. The upstream "
+            "client is a process-wide singleton, so the entries share one "
+            "token and one WS connection; expect the last one set up to win"
+        )
+
     # Build the SSL context off the event loop once, then thread it through
     # every cool-open-client call site so the library never blocks the loop
     # reading the system CA bundle.
@@ -190,7 +285,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
     entry.async_create_background_task(
         hass,
-        _ws_pump(coordinator),
+        _ws_pump(hass, entry, coordinator),
         name=f"{DOMAIN}_ws_pump",
     )
     _async_migrate_unique_ids(hass, entry, units)
@@ -200,7 +295,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Unload a config entry."""
+    """Unload a config entry.
+
+    The client's own `ApiClient` session is deliberately left open: the library
+    keeps `CoolAutomationClient` as a process-wide singleton, so the same
+    session is handed back to the next setup and closing it here would break a
+    reload. The WS session is different — that one is opened per call to
+    `subscribe_unit_updates`, and `_ws_pump` closes it through `aclosing`.
+    """
     if unload_ok := await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
         hass.data[DOMAIN].pop(entry.entry_id)
 

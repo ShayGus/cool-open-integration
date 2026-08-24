@@ -359,3 +359,63 @@ async def test_current_swing_mode_off_on_raw_and_in_list(current):
 
     assert entity.swing_mode == current
     assert entity.swing_mode in entity.swing_modes
+
+
+# --- availability -------------------------------------------------------
+# Until 0.0.21 `available` was hardcoded to True, so a failing coordinator left
+# every entity presenting stale values as if they were live. That is what made
+# the 2026-07-22 CoolAutomation outage invisible: 27 entities froze at the same
+# millisecond and nothing marked them down.
+
+
+def _entity_with_coordinator_success(success: bool):
+    entity = CoolAutomationUnitEntity.__new__(CoolAutomationUnitEntity)
+    coordinator = MagicMock()
+    coordinator.last_update_success = success
+    entity.coordinator = coordinator
+    entity._attr_available = True
+    return entity
+
+
+def test_entity_unavailable_when_coordinator_update_failed():
+    assert _entity_with_coordinator_success(False).available is False
+
+
+def test_entity_available_when_coordinator_update_succeeded():
+    assert _entity_with_coordinator_success(True).available is True
+
+
+# --- targeted state writes ----------------------------------------------
+# A WS push carries one unit but the coordinator notifies every listener, so
+# without a guard one message re-renders all N climate entities.
+
+
+def _entity_for_unit(unit_id: str, pushed_unit_id):
+    entity = CoolAutomationUnitEntity.__new__(CoolAutomationUnitEntity)
+    entity._device_id = unit_id
+    coordinator = MagicMock()
+    coordinator.last_pushed_unit_id = pushed_unit_id
+    entity.coordinator = coordinator
+    return entity
+
+
+def test_push_for_another_unit_does_not_write_state():
+    entity = _entity_for_unit("unit-B", pushed_unit_id="unit-A")
+    with patch.object(CoolAutomationUnitEntity, "async_write_ha_state") as write:
+        entity._handle_coordinator_update()
+    write.assert_not_called()
+
+
+def test_push_for_this_unit_writes_state():
+    entity = _entity_for_unit("unit-A", pushed_unit_id="unit-A")
+    with patch.object(CoolAutomationUnitEntity, "async_write_ha_state") as write:
+        entity._handle_coordinator_update()
+    write.assert_called_once()
+
+
+def test_reconcile_poll_writes_every_entity():
+    """`None` means the update concerned all units, not none of them."""
+    entity = _entity_for_unit("unit-B", pushed_unit_id=None)
+    with patch.object(CoolAutomationUnitEntity, "async_write_ha_state") as write:
+        entity._handle_coordinator_update()
+    write.assert_called_once()

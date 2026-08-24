@@ -55,6 +55,7 @@ Two update channels feed one coordinator:
 | `tests/` | Pytest scaffold using `pytest-homeassistant-custom-component`. Run with `.venv-test/bin/pytest tests/`. |
 | `docs/superpowers/specs/` | Design docs for past initiatives (traffic reduction, WS push) |
 | `docs/superpowers/plans/` | Task-level implementation plans for the same |
+| `docs/memory-investigation.md` | Procedure for attributing HA memory growth to (or clearing) this integration |
 | `config/` (mounted into devcontainer) | HA's config dir used during local development |
 
 ## Companion library
@@ -90,11 +91,72 @@ Integration source is bind-mounted into the container at `/workspaces/core/confi
    - **`gh release create X.Y.Z --title X.Y.Z --notes "..."`** — HACS picks
      up GitHub Releases, not just tags. Easy to forget.
 
+## The WebSocket endpoint override (temporary)
+
+CoolAutomation serves REST and WebSocket from **two different hosts**. The
+official web SDK (`control.coolremote.net`, `vendors.*.js`) declares:
+
+```js
+baseUrl -> https://api.coolremote.net/api/v2
+wsUrl   -> wss://ws.coolremote.net/ws/v2
+```
+
+`cool-open-client` (every version up to and including 0.0.22) hardcodes
+`SOCKET_URI = "wss://api.coolremote.net:443/ws/v2"` — the REST host, which does
+not serve `/ws/v2` at all. Verified with a raw HTTP/1.1 upgrade (curl defaults
+to HTTP/2, which returns a misleading 404 for both):
+
+```
+wss://ws.coolremote.net/ws/v2   -> 101 Switching Protocols
+wss://api.coolremote.net/ws/v2  -> 404 {"errorCode":"NOT_FOUND_2"}
+```
+
+The API answers `401 BAD_OR_MISSING_CREDENTIALS` for bad auth and
+`404 NOT_FOUND_2` for an unknown route, so this is a missing route, not a
+credential problem. **Consequence: WS push has never worked in production** —
+0.0.20 (thread-based) and 0.0.21/0.0.22 (aiohttp) carry the same wrong URL.
+Deployments have been running on the 5-minute reconciliation poll alone.
+
+`_apply_ws_endpoint_override()` in `__init__.py` patches
+`CoolAutomationClient.SOCKET_URI` at setup. **This is temporary.** Once the
+one-line fix ships in `cool-open-client`, raise the `manifest.json` pin and
+delete the override, `WS_URL` in `const.py`, and
+`test_ws_endpoint_override_points_at_the_host_that_serves_the_socket`.
+
 ## Known constraints / non-obvious behaviour
 
-- Token refresh during a live WS session is out of scope. On token
-  expiry, the library backs off forever; the user must reload the
-  config entry to trigger reauth.
+- **Bad token = clean close, not an exception.** The server answers a rejected
+  `authenticate` with `{"type":"error","payload":{"error":"Authentication
+  failed"}}` and hangs up. The library drops that frame (it only forwards
+  `UPDATE_UNIT`) and treats the close as normal, so its own backoff stays at
+  1s and it would reconnect flat out, firing a bulk HTTP refresh each time.
+  `_ws_pump` counts `Reconnected` events with no `UnitUpdate` between them,
+  backs the stream off (an async generator only advances while you pull from
+  it, so sleeping in the pump is what paces the library), and after
+  `WS_STALLED_RECONNECT_LIMIT` gives up and calls `entry.async_start_reauth`.
+- Push updates use `coordinator.async_push_unit_update()` →
+  `async_update_listeners()`, **not** `async_set_updated_data()`. The latter
+  reschedules the update timer, so a steady push stream would keep shoving the
+  5-minute reconciliation poll into the future and the drift safety net would
+  never run.
+- Entities only re-write state for the unit a push actually concerned
+  (`last_pushed_unit_id`). Without that guard one message re-renders all N
+  climate entities — 30x amplification on a 30-room site.
+- `available` must stay inherited from `CoordinatorEntity`. It used to be
+  hardcoded `True`, which meant a failing coordinator left entities presenting
+  stale values as live; that is what made the 2026-07-22 CoolAutomation outage
+  invisible (27 entities frozen at the same millisecond, nothing flagged).
+  `algorithms-hass`'s `climate/online.yaml.jinja` keys its connectivity icon
+  off `states('climate.…') == 'unavailable'` and depends on this being honest.
+- `CoolAutomationClient` is a **process-wide singleton** (`utils/singleton.py`)
+  whose `create()` reassigns `self.token`. Two config entries would share one
+  token and one WS connection. Setup logs a warning; it is not fixable from
+  here. For the same reason `async_unload_entry` must **not** close
+  `client.api_client` — the next setup gets the same instance back.
+- The library attaches its own `StreamHandler(sys.stdout)` at import and pins
+  its level to WARNING while leaving propagation on, so every record lands
+  twice and cannot be silenced from `configuration.yaml`.
+  `_quiet_library_stdout_logging()` undoes that at setup.
 - Units added or removed mid-session won't surface as entities until
   the entry is reloaded. The WS pump builds `units_by_id` once at
   setup; the reconciliation poll sees state changes but doesn't add

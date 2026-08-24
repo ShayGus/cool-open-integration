@@ -24,7 +24,7 @@ from homeassistant.const import (
     PRECISION_WHOLE,
     UnitOfTemperature,
 )
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -103,6 +103,20 @@ class CoolAutomationUnitEntity(
         self._attr_temperature_unit = CELSIUS
         self._attr_supported_features = self.get_supported_features()
         self._attr_precision = self.get_precision()
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        """Write state only when this entity's unit is the one that changed.
+
+        A WS push carries a single unit, but the coordinator notifies every
+        listener, so without this guard one message would re-render all N
+        climate entities. A reconciliation poll leaves `last_pushed_unit_id`
+        as `None`, which means "everything" and writes all of them.
+        """
+        pushed_unit_id = self.coordinator.last_pushed_unit_id
+        if pushed_unit_id is not None and pushed_unit_id != self._device_id:
+            return
+        super()._handle_coordinator_update()
 
     @property
     def unit_data(self) -> HVACUnit:
@@ -220,11 +234,6 @@ class CoolAutomationUnitEntity(
         """Return the maximum temperature."""
         max_temp = self.unit.max_temp
         return max_temp
-
-    @property
-    def available(self) -> bool:
-        """Return True if entity is available."""
-        return True
 
     async def async_set_temperature(self, **kwargs: Any) -> None:
         """Set new target temperature."""
