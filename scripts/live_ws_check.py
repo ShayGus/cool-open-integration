@@ -14,8 +14,8 @@ every git repo). They are never printed or logged:
 
     COOLAUTOMATION_TOKEN=...                 # preferred, see --help
     # or
-    COOLAUTOMATION_USERNAME=...
-    COOLAUTOMATION_PASSWORD=...
+    COOLAUTOMATION_USER=...
+    COOLAUTOMATION_PASS=...
 
 Usage:
     python3 scripts/live_ws_check.py                 # 120s subscription
@@ -41,8 +41,20 @@ sys.path.insert(0, str(REPO_ROOT))
 WS_URL_FALLBACK = "wss://ws.coolremote.net/ws/v2"
 
 
+# Canonical names. `USER`/`PASS` are accepted for older .env files, but note
+# that `USER` is *already* set by the shell to the unix account name: it has to
+# be mapped into a dedicated variable rather than read from the environment,
+# or we would happily send "truha" to CoolAutomation as a username.
+_ALIASES = {
+    "USER": "COOLAUTOMATION_USER",
+    "PASS": "COOLAUTOMATION_PASS",
+    "COOLAUTOMATION_USERNAME": "COOLAUTOMATION_USER",
+    "COOLAUTOMATION_PASSWORD": "COOLAUTOMATION_PASS",
+}
+
+
 def _load_dotenv() -> None:
-    """Pull credentials from Controlá/.env without overriding the environment."""
+    """Pull credentials from a .env file. Earlier files win; the shell does not."""
     for candidate in (REPO_ROOT / ".env", REPO_ROOT.parent / ".env"):
         if not candidate.is_file():
             continue
@@ -52,8 +64,11 @@ def _load_dotenv() -> None:
                 continue
             key, _, value = line.partition("=")
             key = key.strip()
-            if key.startswith("COOLAUTOMATION_") and key not in os.environ:
-                os.environ[key] = value.strip().strip("'\"")
+            target = _ALIASES.get(key)
+            if target is None and key.startswith("COOLAUTOMATION_"):
+                target = key
+            if target is not None:
+                os.environ.setdefault(target, value.strip().strip("'\""))
 
 
 def _ws_url() -> str:
@@ -73,12 +88,12 @@ async def _get_token(ssl_ctx) -> str:
         print("token      : reusing COOLAUTOMATION_TOKEN from the environment")
         return token
 
-    username = os.environ.get("COOLAUTOMATION_USERNAME")
-    password = os.environ.get("COOLAUTOMATION_PASSWORD")
+    username = os.environ.get("COOLAUTOMATION_USER")
+    password = os.environ.get("COOLAUTOMATION_PASS")
     if not username or not password:
         sys.exit(
             "No credentials. Set COOLAUTOMATION_TOKEN, or "
-            "COOLAUTOMATION_USERNAME + COOLAUTOMATION_PASSWORD, in Controlá/.env"
+            "COOLAUTOMATION_USER + COOLAUTOMATION_PASS, in .env"
         )
 
     print(f"auth       : POST /users/authenticate as {username[:2]}***")
