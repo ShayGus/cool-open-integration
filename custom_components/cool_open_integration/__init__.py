@@ -91,6 +91,7 @@ async def _ws_pump(
     client = coordinator.client
     units_by_id = {u.id: u for u in coordinator.units}
     stalled_reconnects = 0
+    token_looks_rejected = False
 
     try:
         async with aclosing(client.subscribe_unit_updates()) as stream:
@@ -105,16 +106,11 @@ async def _ws_pump(
                 elif isinstance(event, Reconnected):
                     stalled_reconnects += 1
                     if stalled_reconnects >= WS_STALLED_RECONNECT_LIMIT:
-                        _LOGGER.error(
-                            "WS reconnected %d times without receiving any unit "
-                            "update; the server is most likely rejecting our "
-                            "token. Stopping the WS pump and asking for "
-                            "reauthentication; the 5-minute reconciliation poll "
-                            "keeps entities alive meanwhile",
-                            stalled_reconnects,
-                        )
-                        entry.async_start_reauth(hass)
-                        return
+                        # Break rather than return: the socket is live at this
+                        # point, and starting a reauth flow while the stream is
+                        # still being torn down leaves its heartbeat timer armed.
+                        token_looks_rejected = True
+                        break
                     await coordinator.async_request_refresh()
                     if stalled_reconnects > 1:
                         delay = min(
@@ -135,6 +131,17 @@ async def _ws_pump(
             "WS pump terminated unexpectedly; entry will rely on the "
             "5-minute reconciliation poll until reload",
         )
+        return
+
+    if token_looks_rejected:
+        _LOGGER.error(
+            "WS reconnected %d times without receiving any unit update; the "
+            "server is most likely rejecting our token. Stopped the WS pump "
+            "and asked for reauthentication; the 5-minute reconciliation poll "
+            "keeps entities alive meanwhile",
+            stalled_reconnects,
+        )
+        entry.async_start_reauth(hass)
 
 
 @callback
