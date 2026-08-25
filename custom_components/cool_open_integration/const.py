@@ -9,3 +9,6 @@ PLATFORMS = [Platform.CLIMATE]
 TEMP_CELSIUS = "°C"
 REFRESH_DELAY = 3.0
 RECONCILE_INTERVAL_MINUTES = 5
+
+# cool-open-client 0.0.22 uses the REST host for its WebSocket connection.
+WS_URL = "wss://ws.coolremote.net/ws/v2"

@@ -17,13 +17,18 @@ from cool_open_client.cool_automation_client import (
 )
 from cool_open_client.ws_events import Reconnected, UnitUpdate
 
-from .const import DOMAIN, PLATFORMS
+from .const import DOMAIN, PLATFORMS, WS_URL
 from .coordinator import CoolAutomationDataUpdateCoordinator
 
 # TODO List the platforms that you want to support.
 # For your initial PR, limit it to 1 platform.
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def _apply_ws_endpoint_override() -> None:
+    """Use the WebSocket host until the pinned client release is fixed."""
+    CoolAutomationClient.SOCKET_URI = WS_URL
 
 
 async def _ws_pump(coordinator: "CoolAutomationDataUpdateCoordinator") -> None:
@@ -142,6 +147,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     #     return bool(hass.config_entries.async_entries(DOMAIN))
 
     _LOGGER.debug("async setup")
+    _apply_ws_endpoint_override()
     # Build the SSL context off the event loop once, then thread it through
     # every cool-open-client call site so the library never blocks the loop
     # reading the system CA bundle.
