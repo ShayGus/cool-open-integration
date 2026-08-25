@@ -39,7 +39,7 @@ Two update channels feed one coordinator:
 
 1. **WS pump (primary)** — `_ws_pump` in `__init__.py` reads
    `subscribe_unit_updates()` forever. Each `UnitUpdate` mutates the
-   matching `HVACUnit` and pushes via `async_set_updated_data`. Each
+   matching `HVACUnit` and pushes via `async_push_unit_update()`. Each
    `Reconnected` triggers an immediate `async_request_refresh`.
 2. **Reconciliation poll (safety net)** — `_async_update_data` issues
    one bulk HTTP call every 5 minutes, distributes the result to in-

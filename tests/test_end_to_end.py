@@ -97,7 +97,6 @@ async def test_push_update_reaches_the_entity_state(hass, stub):
     assert stub.ws_connection_count == 1
 
     entity_id = hass.states.async_entity_ids("climate")[0]
-    unit_id = hass.states.get(entity_id).attributes and entity_id
     before = hass.states.get(entity_id).attributes["current_temperature"]
 
     await stub.push_update("unit-A", ambientTemperature=before + 5)
